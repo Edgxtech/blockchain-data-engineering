@@ -1,0 +1,2 @@
+ogmios==1.2.1
+jsonpickle==2.2.0
