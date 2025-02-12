@@ -18,8 +18,7 @@ Options are to use:
 1. *Ogmios* service from [Demeter.run](https://demeter.run) (perhaps only for quickstart and testing), or
 2. Custom service
 
-#### src/cardano_streamer/app.properties
-
+Configure **src/cardano_streamer/app.properties**
 ```properties
 cardano.ogmios.address=mainnet-v6.ogmios-m1.demeter.run
 cardano.ogmios.port=443
@@ -37,9 +36,11 @@ cardano.start.point.block=4eaff920aa8392f4796365b97c6fc77d92eb9756940651e23b4ec2
 cardano.start.point.slot=133303289
 ```
 
-#### Configure environment
+Configure environment
+```bash
 pip install -r src/cardano_streamer/requirements.txt
 pip install -r src/etl_blockchain/requirements.txt
+```
 
 ## Run
 
