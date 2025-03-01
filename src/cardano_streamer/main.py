@@ -52,8 +52,15 @@ def streamTheData(c_socket):
             c_socket.send(bytes("{}\n".format(block_json), "utf-8"))
 
 def waitForConnectionThenStartStreaming():
-    c_socket = openSocket()
-    streamTheData(c_socket)
+    while True:
+        c_socket = openSocket()
+        try:
+            print("Restarting..")
+            streamTheData(c_socket)
+        except socket.error as msg:
+            print(f"{msg}")
+            c_socket.close()
+            continue
 
 if __name__ == "__main__":
     waitForConnectionThenStartStreaming()
