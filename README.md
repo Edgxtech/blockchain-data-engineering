@@ -6,7 +6,7 @@
 # Blockchain Data Engineering
 
 This is a companion repository for the 
-[**"Getting Started as a Data Engineer with a Blockchain Scenario"**](https://medium.com/search?q=Geting+Started+as+a+Data+Engineer)
+[**"Getting Started as a Data Engineer with a Blockchain Scenario"**](https://medium.com/@tdedgx/getting-started-as-a-data-engineer-with-a-blockchain-scenario-part-i-ce7c3aea3433)
 tutorial series.
 
 ## Setup
