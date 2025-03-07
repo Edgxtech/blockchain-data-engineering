@@ -55,7 +55,6 @@ def waitForConnectionThenStartStreaming():
     while True:
         c_socket = openSocket()
         try:
-            print("Restarting..")
             streamTheData(c_socket)
         except socket.error as msg:
             print(f"{msg}")

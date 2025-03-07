@@ -24,7 +24,9 @@ from util import schema
 blocks = (raw_data.select(from_json(col("value"), schema.block_schema).alias("json"))
           .select("json.py/state.*"))
 
-from blockfrost import BlockFrostApi
+from blockfrost import BlockFrostApi, ApiError
+import time
+from requests.exceptions import RequestException
 
 bfApi = BlockFrostApi(
     project_id=config_dict['cardano.db.apikey'],
@@ -33,10 +35,19 @@ bfApi = BlockFrostApi(
 )
 
 @udf(returnType=schema.blockfrost_inputs_schema)
-def fetch_inputs(tx_hash):
-    response = bfApi.transaction_utxos(hash=tx_hash)
-    result = [input for input in response.inputs if input.collateral == False]
-    return result
+def fetch_inputs(tx_hash, max_retries=3, delay=1):
+    attempt = 0
+    while attempt <= max_retries:
+        try:
+            response = bfApi.transaction_utxos(hash=tx_hash)
+            result = [input for input in response.inputs if input.collateral == False]
+            return result
+        except ApiError as e:
+            attempt += 1
+            if attempt > max_retries:
+                raise RequestException(f"Blockfrost API call failed after {max_retries} retries: {str(e)}")
+            print(f"Blockfrost attempt {attempt} failed: {str(e)}. Retrying in {delay:.2f} seconds...")
+            time.sleep(delay)
 
 def qualify_transactions(df) -> DataFrame:
     block = df \
@@ -162,25 +173,22 @@ neo4j_properties = {
     "db_name": "neo4j"
 }
 
-def write_streaming(df, _batch_id) -> None:
-    tx_with_inputs = qualify_transactions(df)
-    ## Compute the transacted actions
-    transacted_by_tx = tx_with_inputs.groupBy("hash").agg(
-        get_transacted_actions(any_value("outputs"), any_value("inputs")).alias("transacted"))
-    ## Join to create a master DF with all properties
+def determine_volumes(tx_with_inputs, transacted_by_tx):
     transacted_by_tx_all = transacted_by_tx.join(tx_with_inputs.select("hash", "height", "slot"), "hash", "inner")
-    ## Add volumes exchanged
     vols_by_tx = transacted_by_tx_all.withColumn("vol", reduce_vol("transacted"))
-    ## Persist volumes data
-    vols_by_tx.select("hash", "height", "slot", explode("vol").alias("vol"))\
-        .select("hash", "height", "slot","vol.unit", "vol.value_adj") \
-        .write.jdbc(url=db_url, table="vol", mode="append", properties=db_properties)
-    ## Compute transfers
+    return vols_by_tx.select("hash", "height", "slot", explode("vol").alias("vol")) \
+        .select("hash", "height", "slot", "vol.unit", "vol.value_adj")
+
+def determine_transfers(transacted_by_tx):
     transfers = transacted_by_tx.withColumn("actions", compute_transfers("transacted"))
-    ## Persist properties to persist in Neo4j
-    transfersx = transfers.select(explode("actions").alias("actions"),"hash").select("actions.*",col("hash").alias("tx_hash"))
-    ## Persist transfers data
-    ( transfersx.write
+    return transfers.select(explode("actions").alias("actions"), "hash") \
+        .select("actions.*",col("hash").alias("tx_hash"))
+
+def write_postgres(vols_by_tx) -> None:
+    vols_by_tx.write.jdbc(url=db_url, table="vol", mode="append", properties=db_properties)
+
+def write_neo4j(transfers) -> None:
+    ( transfers.write
         .mode("Overwrite")
         .format("org.neo4j.spark.DataSource")
         .option("url", neo4j_properties["url"])
@@ -200,12 +208,26 @@ def write_streaming(df, _batch_id) -> None:
         .option("relationship.properties", "tx_hash,unit,value,value_adj:value_ada")
         .save() )
 
+def write_streaming(df, _batch_id) -> None:
+    ## Qualify transactions adding resolved inputs
+    tx_with_inputs = qualify_transactions(df)
+    ## Find the transacted actions
+    transacted_by_tx = tx_with_inputs.groupBy("hash").agg(
+        get_transacted_actions(any_value("outputs"), any_value("inputs")).alias("transacted"))
+    ## Determine volumes and transfers
+    volumes = determine_volumes(tx_with_inputs, transacted_by_tx)
+    transfers = determine_transfers(transacted_by_tx)
+    ## Persist volumes and transfers
+    write_postgres(volumes)
+    write_neo4j(transfers)
+
 def run_streaming_job(time_seconds):
     query = blocks.writeStream \
         .foreachBatch(lambda df, batch_id: write_streaming(df, batch_id)) \
         .start()
     import time
     time.sleep(time_seconds)
+    print("Shutting down naturally")
     query.stop()
 
 if __name__ == "__main__":
