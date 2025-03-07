@@ -1,4 +1,4 @@
 psycopg2==2.9.10
 matplotlib==3.9.3
 neo4j==5.26.0
-networkx==3.4.2
+dash-cytoscape==1.0.2
